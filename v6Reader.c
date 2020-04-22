@@ -1,49 +1,30 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <string.h>
+#include<errno.h>
+extern int errno;
 
-#define BLOCK_SIZE 1024
-#define INODE_SIZE 64
-
-typedef	struct {
-  unsigned short	isize;	//	2	bytes	- Blocks	for	i-list
-  unsigned short	fsize;	//	2	bytes	- Number	of	blocks
-  unsigned short	nfree;	//	2	bytes	- Pointer	of	free	block	array
-  unsigned short ninode; //	2	bytes	- Pointer	of	free	inodes	array
-  unsigned int free[152]; // Array to track free blocks
-  unsigned short inode[200]; // Array to store free inodes
-  char flock;
-  char ilock;
-  unsigned short fmod;
-  unsigned short time[2]; // To store	epoch
-}	superblock_type;
-
-typedef	struct{
-  unsigned	short	flags;	//	Flag	of	a	file
-  unsigned	short	nlinks;	//	Number	of	links	to	a	file
-  unsigned	short	uid;	//	User	ID	of	owner
-  unsigned	short	gid;	//	Group	ID	of	owner
-  unsigned	int	size;	//	4	bytes	- Size	of	the	file
-  unsigned	int	addr[11];	//	Block	numbers	of	the	file	location.
-  // addr[10] is	used for	double	indirect block
-  unsigned	short	actime[2];	//	Last	Access	time
-  unsigned	short	modtime[2];	//	Last	modified	time
-}	inode_type;
-
-// directory entry is 16 bytes.
-// bytes 0 and 1 together are the i-number
-// bytes 2-15 are the file name (14 characters)
-typedef struct {
-  unsigned short iNumber;
-  char fileName[14];
-} directory_entry_type;
-
-typedef struct {
-  directory_entry_type entries[64];
-} directory_block_type;
+#include "types.h"
 
 unsigned int blockToByteOffset(unsigned int blockNum) {
   return BLOCK_SIZE * (blockNum);
+}
+
+directory_block_type getDirectoryBlockFromFs(int fd, unsigned int blockNum) {
+  lseek(fd, blockToByteOffset(blockNum), SEEK_SET);
+  directory_block_type dir;
+  read(fd, &dir, BLOCK_SIZE);
+
+  return dir;
+}
+
+plain_block_type getPlainBlockFromFs(int fd, unsigned int blockNum) {
+  lseek(fd, blockToByteOffset(blockNum), SEEK_SET);
+  plain_block_type block;
+  read(fd, &block, BLOCK_SIZE);
+
+  return block;
 }
 
 unsigned int inodeToByteOffset(unsigned int inodeNumber) {
@@ -51,6 +32,89 @@ unsigned int inodeToByteOffset(unsigned int inodeNumber) {
   // inodeNumber input starts at 1. Access starts at 0.
   // inodeNumber = 1 => 2048 + (INODE_SIZE * 0)
   return 2048 + (INODE_SIZE * (inodeNumber - 1));
+}
+
+inode_type getInodeBlockFromFs(int fd, unsigned int inodeNumber) {
+  lseek(fd, inodeToByteOffset(inodeNumber), SEEK_SET);
+  inode_type inode;
+  read(fd, &inode, INODE_SIZE);
+
+  return inode;
+}
+
+void recurseIntoFiles(int fd, char token[], unsigned int currentInodeNumber) {
+  printf("Just recursed\n");
+
+  char* nextTok = strtok(NULL, "/");
+
+  printf("Looking for: %s\n", token);
+
+  inode_type currentInode = getInodeBlockFromFs(fd, currentInodeNumber);
+
+  unsigned short sizeCheck = 0b0001000000000000;
+  unsigned short isDir = 0b0100000000000000;
+  if (currentInode.flags & sizeCheck) {
+    // large file
+  }
+  else {
+    if (currentInode.flags & isDir) {
+      for (int j = 0; j < INODE_ADDR_LENGTH; ++j) {
+        unsigned int blockNumber = currentInode.addr[j];
+
+        if (blockNumber == 0) {
+          continue;
+        }
+
+        directory_block_type currentDir = getDirectoryBlockFromFs(fd,
+            blockNumber);
+
+        for (int i = 0; i < ENTRIES_IN_DIR; ++i) {
+          unsigned short iNumber = currentDir.entries[i].iNumber;
+
+          if (iNumber == 0 || iNumber == currentInodeNumber) {
+            continue;
+          }
+
+          int same = strcmp(token, currentDir.entries[i].fileName);
+          if (same == 0) {
+            recurseIntoFiles(fd, nextTok, iNumber);
+            return;
+          }
+        }
+      }
+    } else {
+      // not a directory. Check if regular file.
+      unsigned short regularFile = 0b1000000000000000;
+      if (currentInode.flags & regularFile) {
+        int writefile = open("myoutputfile.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (writefile < 0) {
+          printf("There was an error opening output file. Error Number %d\n",
+              errno);
+        }
+
+        for (int i = 0; i < INODE_ADDR_LENGTH; ++i) {
+          int dataBlockNum = currentInode.addr[i];
+          if (dataBlockNum != 0) {
+            plain_block_type b = getPlainBlockFromFs(fd, currentInode.addr[i]);
+            int writeStatus = write(writefile, &b.text, BLOCK_SIZE);
+            if (writeStatus < 0) {
+              printf("There was an error writing to myoutputfile.txt.\n");
+            }
+          }
+        }
+        int closeStatus = close(writefile);
+        if (closeStatus < 0) {
+          printf("There was an error closing myoutputfile.txt.\n");
+        }
+        return;
+      }
+    }
+  }
+}
+
+void findFile(int fd, char path[]) {
+  char * firstToken = strtok(path, "/");
+  recurseIntoFiles(fd, firstToken, 1);
 }
 
 int main() {
@@ -66,37 +130,18 @@ int main() {
     return 1;
   }
 
-//  printf("Enter the file you want to read from it: \n");
-//  scanf("%s", fileToRead);
-//  printf("Looking for that file.\n");
+  printf("Enter the file you want to read from it: \n");
+  scanf("%s", fileToRead);
+  printf("Looking for that file. Running findFile().\n");
 
   // start off at super block (block 2)
   // by going 1024 bytes from the left.
   lseek(fd, 1024, SEEK_SET);
-
   superblock_type superBlock;
   read(fd, &superBlock, BLOCK_SIZE);
 
-  inode_type firstInode;
-  lseek(fd, inodeToByteOffset(1), SEEK_SET);
-  read(fd, &firstInode, INODE_SIZE);
+  findFile(fd, fileToRead);
 
-  unsigned int rootAddr = firstInode.addr[0];
-  unsigned int blockNum = blockToByteOffset(rootAddr);
-
-  lseek(fd, blockNum, SEEK_SET);
-
-  directory_block_type rootDir;
-  read(fd, &rootDir, BLOCK_SIZE);
-
-  inode_type dir2Inode;
-  lseek(fd, inodeToByteOffset(4), SEEK_SET);
-  read(fd, &dir2Inode, INODE_SIZE);
-
-  unsigned int dir2BlockNum = blockToByteOffset(dir2Inode.addr[0]);
-  directory_block_type dir2;
-  lseek(fd, dir2BlockNum, SEEK_SET);
-  read(fd, &dir2, BLOCK_SIZE);
 
   printf("superblock.fsize: %hu", superBlock.fsize);
 
