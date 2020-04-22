@@ -60,7 +60,7 @@ int main() {
   printf("Welcome. Enter the v6 filename: \n");
   scanf("%s", v6Filename);
 
-  int fd = open("v6fs", 2);
+  int fd = open(v6Filename, 2);
   if (fd < 0) {
     printf("Error opening that file.\n");
     return 1;
