@@ -97,5 +97,8 @@ int main() {
   directory_block_type dir2;
   lseek(fd, dir2BlockNum, SEEK_SET);
   read(fd, &dir2, BLOCK_SIZE);
+
+  printf("superblock.fsize: %hu", superBlock.fsize);
+
   return 0;
 }
