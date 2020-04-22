@@ -1,3 +1,5 @@
 *~
 v6Reader
-v6fs
+.idea/
+CMakeLists.txt
+cmake-build-debug/
