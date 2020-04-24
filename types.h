@@ -53,4 +53,9 @@ typedef struct {
   char text[BLOCK_SIZE];
 } plain_block_type;
 
+#define ADDRS_IN_INDIRECT_BLOCK BLOCK_SIZE/sizeof(int)
+typedef struct {
+  unsigned int addrs[ADDRS_IN_INDIRECT_BLOCK];
+} single_indirect_block_type;
+
 #endif //FS_TYPES_H

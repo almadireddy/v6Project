@@ -11,6 +11,15 @@ unsigned int blockToByteOffset(unsigned int blockNum) {
   return BLOCK_SIZE * (blockNum);
 }
 
+single_indirect_block_type getIndirectBlockFromFs(int fd, unsigned int
+blockNum) {
+  lseek(fd, blockToByteOffset(blockNum), SEEK_SET);
+  single_indirect_block_type dir;
+  read(fd, &dir, BLOCK_SIZE);
+
+  return dir;
+}
+
 directory_block_type getDirectoryBlockFromFs(int fd, unsigned int blockNum) {
   lseek(fd, blockToByteOffset(blockNum), SEEK_SET);
   directory_block_type dir;
@@ -110,22 +119,39 @@ void findFile(int fd, char path[]) {
     unsigned int sizeToWrite  = inodeForFile.size;
 
     if (inodeForFile.flags & sizeCheck) {
-      // large file
-    } else {
-      for (int i = 0; i < INODE_ADDR_LENGTH; ++i) {
-        unsigned int dataBlockNum = inodeForFile.addr[i];
+      // every block here is a list of block numbers.
+      // each one has 256 ints that point to data blocks.
+      for (int i = 0; i < INODE_ADDR_LENGTH - 1; ++i) {
+        single_indirect_block_type block = getIndirectBlockFromFs(fd,
+            inodeForFile.addr[i]);
 
-        if (dataBlockNum != 0) {
-          plain_block_type b = getPlainBlockFromFs(fd, inodeForFile.addr[i]);
-
-          // only write until end of file.
+        for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
+          plain_block_type b = getPlainBlockFromFs(fd, block.addrs[j]);
           unsigned int toWrite;
           if (BLOCK_SIZE < sizeToWrite) {
             toWrite = BLOCK_SIZE;
           } else {
             toWrite = sizeToWrite;
           }
+          int writeStatus = write(writefile, &b.text, toWrite);
+          if (writeStatus < 0) {
+            printf("There was an error writing to myoutputfile.txt.\n");
+          }
+          sizeToWrite -= writeStatus;
+        }
+      }
+    } else {
+      for (int i = 0; i < INODE_ADDR_LENGTH; ++i) {
+        unsigned int dataBlockNum = inodeForFile.addr[i];
 
+        if (dataBlockNum != 0) {
+          plain_block_type b = getPlainBlockFromFs(fd, inodeForFile.addr[i]);
+          unsigned int toWrite;
+          if (BLOCK_SIZE < sizeToWrite) {
+            toWrite = BLOCK_SIZE;
+          } else {
+            toWrite = sizeToWrite;
+          }
           int writeStatus = write(writefile, &b.text, toWrite);
           if (writeStatus < 0) {
             printf("There was an error writing to myoutputfile.txt.\n");
