@@ -42,79 +42,104 @@ inode_type getInodeBlockFromFs(int fd, unsigned int inodeNumber) {
   return inode;
 }
 
-void recurseIntoFiles(int fd, char token[], unsigned int currentInodeNumber) {
-  printf("Just recursed\n");
-
+// use inode size to determine how much of the block to read;
+unsigned short recurseIntoFiles(int fd, char token[], unsigned int
+currentInodeNumber) {
   char* nextTok = strtok(NULL, "/");
 
   printf("Looking for: %s\n", token);
 
   inode_type currentInode = getInodeBlockFromFs(fd, currentInodeNumber);
 
-  unsigned short sizeCheck = 0b0001000000000000;
   unsigned short isDir = 0b0100000000000000;
-  if (currentInode.flags & sizeCheck) {
-    // large file
-  }
-  else {
-    if (currentInode.flags & isDir) {
-      for (int j = 0; j < INODE_ADDR_LENGTH; ++j) {
-        unsigned int blockNumber = currentInode.addr[j];
 
-        if (blockNumber == 0) {
+  if (currentInode.flags & isDir) {
+    for (int j = 0; j < INODE_ADDR_LENGTH; ++j) {
+      unsigned int blockNumber = currentInode.addr[j];
+
+      if (blockNumber == 0) {
+        continue;
+      }
+
+      directory_block_type currentDir = getDirectoryBlockFromFs(fd,
+          blockNumber);
+
+      for (int i = 0; i < ENTRIES_IN_DIR; ++i) {
+        unsigned short iNumber = currentDir.entries[i].iNumber;
+
+        if (iNumber == 0 || iNumber == currentInodeNumber) {
           continue;
         }
 
-        directory_block_type currentDir = getDirectoryBlockFromFs(fd,
-            blockNumber);
-
-        for (int i = 0; i < ENTRIES_IN_DIR; ++i) {
-          unsigned short iNumber = currentDir.entries[i].iNumber;
-
-          if (iNumber == 0 || iNumber == currentInodeNumber) {
-            continue;
+        int same = strcmp(token, currentDir.entries[i].fileName);
+        if (same == 0) {
+          if (nextTok == NULL) {
+            return iNumber;
           }
-
-          int same = strcmp(token, currentDir.entries[i].fileName);
-          if (same == 0) {
-            recurseIntoFiles(fd, nextTok, iNumber);
-            return;
-          }
+          return recurseIntoFiles(fd, nextTok, iNumber);
         }
-      }
-    } else {
-      // not a directory. Check if regular file.
-      unsigned short regularFile = 0b1000000000000000;
-      if (currentInode.flags & regularFile) {
-        int writefile = open("myoutputfile.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (writefile < 0) {
-          printf("There was an error opening output file. Error Number %d\n",
-              errno);
-        }
-
-        for (int i = 0; i < INODE_ADDR_LENGTH; ++i) {
-          int dataBlockNum = currentInode.addr[i];
-          if (dataBlockNum != 0) {
-            plain_block_type b = getPlainBlockFromFs(fd, currentInode.addr[i]);
-            int writeStatus = write(writefile, &b.text, BLOCK_SIZE);
-            if (writeStatus < 0) {
-              printf("There was an error writing to myoutputfile.txt.\n");
-            }
-          }
-        }
-        int closeStatus = close(writefile);
-        if (closeStatus < 0) {
-          printf("There was an error closing myoutputfile.txt.\n");
-        }
-        return;
       }
     }
   }
+  return 0;
 }
 
 void findFile(int fd, char path[]) {
   char * firstToken = strtok(path, "/");
-  recurseIntoFiles(fd, firstToken, 1);
+  // traverse directories and return the inode for file we are looking for.
+  unsigned short iNumberForFile = recurseIntoFiles(fd, firstToken, 1);
+
+  if (iNumberForFile == 0) {
+    printf("Could not find that file.\n");
+    return;
+  }
+
+  inode_type inodeForFile = getInodeBlockFromFs(fd, iNumberForFile);
+
+  unsigned short regularFile = 0b1000000000000000;
+  unsigned short sizeCheck = 0b0001000000000000;
+  if (inodeForFile.flags & regularFile) {
+    printf("Found file, attempting to retrieve and write to myoutputfile.txt\n");
+
+    int writefile = open("myoutputfile.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (writefile < 0) {
+      printf("There was an error opening output file. Error Number %d\n",
+             errno);
+    }
+
+    unsigned int sizeToWrite  = inodeForFile.size;
+
+    if (inodeForFile.flags & sizeCheck) {
+      // large file
+    } else {
+      for (int i = 0; i < INODE_ADDR_LENGTH; ++i) {
+        unsigned int dataBlockNum = inodeForFile.addr[i];
+
+        if (dataBlockNum != 0) {
+          plain_block_type b = getPlainBlockFromFs(fd, inodeForFile.addr[i]);
+
+          // only write until end of file.
+          unsigned int toWrite;
+          if (BLOCK_SIZE < sizeToWrite) {
+            toWrite = BLOCK_SIZE;
+          } else {
+            toWrite = sizeToWrite;
+          }
+
+          int writeStatus = write(writefile, &b.text, toWrite);
+          if (writeStatus < 0) {
+            printf("There was an error writing to myoutputfile.txt.\n");
+          }
+          sizeToWrite -= writeStatus;
+        }
+      }
+    }
+    int closeStatus = close(writefile);
+    if (closeStatus < 0) {
+      printf("There was an error closing myoutputfile.txt.\n");
+    }
+    return;
+  }
 }
 
 int main() {
@@ -141,9 +166,6 @@ int main() {
   read(fd, &superBlock, BLOCK_SIZE);
 
   findFile(fd, fileToRead);
-
-
-  printf("superblock.fsize: %hu", superBlock.fsize);
 
   return 0;
 }
