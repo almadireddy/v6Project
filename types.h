@@ -58,4 +58,8 @@ typedef struct {
   unsigned int addrs[ADDRS_IN_INDIRECT_BLOCK];
 } single_indirect_block_type;
 
+unsigned short regularFileFlag = 0b1000000000000000;
+unsigned short largeFileFlag = 0b0001000000000000;
+unsigned short dirFlag = 0b0100000000000000;
+
 #endif //FS_TYPES_H

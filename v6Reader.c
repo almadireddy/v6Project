@@ -60,32 +60,73 @@ currentInodeNumber) {
 
   inode_type currentInode = getInodeBlockFromFs(fd, currentInodeNumber);
 
-  unsigned short isDir = 0b0100000000000000;
-
-  if (currentInode.flags & isDir) {
-    for (int j = 0; j < INODE_ADDR_LENGTH; ++j) {
-      unsigned int blockNumber = currentInode.addr[j];
-
-      if (blockNumber == 0) {
-        continue;
-      }
-
-      directory_block_type currentDir = getDirectoryBlockFromFs(fd,
-          blockNumber);
-
-      for (int i = 0; i < ENTRIES_IN_DIR; ++i) {
-        unsigned short iNumber = currentDir.entries[i].iNumber;
-
-        if (iNumber == 0 || iNumber == currentInodeNumber) {
+  if (currentInode.flags & dirFlag) {
+    if (currentInode.flags & largeFileFlag) {
+      // large file directory
+      for (int i = 0; i < INODE_ADDR_LENGTH - 1; ++i) {
+        unsigned int indirectBlockNum = currentInode.addr[i];
+        if (indirectBlockNum == 0) {
           continue;
         }
 
-        int same = strcmp(token, currentDir.entries[i].fileName);
-        if (same == 0) {
-          if (nextTok == NULL) {
-            return iNumber;
+        single_indirect_block_type indirectBlock = getIndirectBlockFromFs(fd,
+            indirectBlockNum);
+
+        for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
+          unsigned int currentAddress = indirectBlock.addrs[j];
+
+          if (currentAddress == 0) {
+            continue;
           }
-          return recurseIntoFiles(fd, nextTok, iNumber);
+
+          directory_block_type currentDir = getDirectoryBlockFromFs(fd, currentAddress);
+
+          for (int k = 0; k < ENTRIES_IN_DIR; ++k) {
+            directory_entry_type currentEntry = currentDir.entries[k];
+            unsigned short iNumber = currentEntry.iNumber;
+
+            if (iNumber == 0 || iNumber == currentInodeNumber) {
+              continue;
+            }
+
+            int same = strcmp(token, currentEntry.fileName);
+            if (same == 0) {
+              if (nextTok == NULL) {
+                return iNumber;
+              }
+              return recurseIntoFiles(fd, nextTok, iNumber);
+            }
+          }
+        }
+      }
+    }
+    else {
+      // small file directory
+      for (int j = 0; j < INODE_ADDR_LENGTH - 1; ++j) {
+        unsigned int blockNumber = currentInode.addr[j];
+
+        if (blockNumber == 0) {
+          continue;
+        }
+
+        directory_block_type currentDir = getDirectoryBlockFromFs(fd,
+                                                                  blockNumber);
+
+        for (int i = 0; i < ENTRIES_IN_DIR; ++i) {
+          directory_entry_type currentEntry = currentDir.entries[i];
+          unsigned short iNumber = currentEntry.iNumber;
+
+          if (iNumber == 0 || iNumber == currentInodeNumber) {
+            continue;
+          }
+
+          int same = strcmp(token, currentEntry.fileName);
+          if (same == 0) {
+            if (nextTok == NULL) {
+              return iNumber;
+            }
+            return recurseIntoFiles(fd, nextTok, iNumber);
+          }
         }
       }
     }
@@ -105,9 +146,7 @@ void findFile(int fd, char path[]) {
 
   inode_type inodeForFile = getInodeBlockFromFs(fd, iNumberForFile);
 
-  unsigned short regularFile = 0b1000000000000000;
-  unsigned short sizeCheck = 0b0001000000000000;
-  if (inodeForFile.flags & regularFile) {
+  if (inodeForFile.flags & regularFileFlag) {
     printf("Found file, attempting to retrieve and write to myoutputfile.txt\n");
 
     int writefile = open("myoutputfile.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -118,7 +157,7 @@ void findFile(int fd, char path[]) {
 
     unsigned int sizeToWrite  = inodeForFile.size;
 
-    if (inodeForFile.flags & sizeCheck) {
+    if (inodeForFile.flags & largeFileFlag) {
       // every block here is a list of block numbers.
       // each one has 256 ints that point to data blocks.
       for (int i = 0; i < INODE_ADDR_LENGTH - 1; ++i) {
@@ -126,22 +165,25 @@ void findFile(int fd, char path[]) {
             inodeForFile.addr[i]);
 
         for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
-          plain_block_type b = getPlainBlockFromFs(fd, block.addrs[j]);
-          unsigned int toWrite;
-          if (BLOCK_SIZE < sizeToWrite) {
-            toWrite = BLOCK_SIZE;
-          } else {
-            toWrite = sizeToWrite;
+          unsigned int dataBlockNum = block.addrs[j];
+          if (dataBlockNum != 0) {
+            plain_block_type b = getPlainBlockFromFs(fd, block.addrs[j]);
+            unsigned int toWrite;
+            if (BLOCK_SIZE < sizeToWrite) {
+              toWrite = BLOCK_SIZE;
+            } else {
+              toWrite = sizeToWrite;
+            }
+            int writeStatus = write(writefile, &b.text, toWrite);
+            if (writeStatus < 0) {
+              printf("There was an error writing to myoutputfile.txt.\n");
+            }
+            sizeToWrite -= writeStatus;
           }
-          int writeStatus = write(writefile, &b.text, toWrite);
-          if (writeStatus < 0) {
-            printf("There was an error writing to myoutputfile.txt.\n");
-          }
-          sizeToWrite -= writeStatus;
         }
       }
     } else {
-      for (int i = 0; i < INODE_ADDR_LENGTH; ++i) {
+      for (int i = 0; i < INODE_ADDR_LENGTH - 1; ++i) {
         unsigned int dataBlockNum = inodeForFile.addr[i];
 
         if (dataBlockNum != 0) {
