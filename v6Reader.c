@@ -51,6 +51,29 @@ inode_type getInodeBlockFromFs(int fd, unsigned int inodeNumber) {
   return inode;
 }
 
+unsigned short lookThroughDirectory(int fd, directory_block_type *currentDir,
+                                    unsigned int currentInodeNumber, char
+                                    token[], char nextTok[]) {
+  for (int i = 0; i < ENTRIES_IN_DIR; ++i) {
+    directory_entry_type currentEntry = currentDir->entries[i];
+    unsigned short iNumber = currentEntry.iNumber;
+
+    if (iNumber == 0 || iNumber == currentInodeNumber || iNumber > superBlock
+    .isize*INODE_SIZE) {
+      continue;
+    }
+
+    int same = strcmp(token, currentEntry.fileName);
+    if (same == 0) {
+      if (nextTok == NULL) {
+        return iNumber;
+      }
+      return recurseIntoFiles(fd, nextTok, iNumber);
+    }
+  }
+  return 0;
+}
+
 // use inode size to determine how much of the block to read;
 unsigned short recurseIntoFiles(int fd, char token[], unsigned int
 currentInodeNumber) {
@@ -70,7 +93,7 @@ currentInodeNumber) {
         }
 
         single_indirect_block_type indirectBlock = getIndirectBlockFromFs(fd,
-            indirectBlockNum);
+                                                                          indirectBlockNum);
 
         for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
           unsigned int currentAddress = indirectBlock.addrs[j];
@@ -81,22 +104,8 @@ currentInodeNumber) {
 
           directory_block_type currentDir = getDirectoryBlockFromFs(fd, currentAddress);
 
-          for (int k = 0; k < ENTRIES_IN_DIR; ++k) {
-            directory_entry_type currentEntry = currentDir.entries[k];
-            unsigned short iNumber = currentEntry.iNumber;
-
-            if (iNumber == 0 || iNumber == currentInodeNumber) {
-              continue;
-            }
-
-            int same = strcmp(token, currentEntry.fileName);
-            if (same == 0) {
-              if (nextTok == NULL) {
-                return iNumber;
-              }
-              return recurseIntoFiles(fd, nextTok, iNumber);
-            }
-          }
+          return lookThroughDirectory(fd, &currentDir, currentInodeNumber,
+                                      token, nextTok);
         }
       }
     }
@@ -112,29 +121,36 @@ currentInodeNumber) {
         directory_block_type currentDir = getDirectoryBlockFromFs(fd,
                                                                   blockNumber);
 
-        for (int i = 0; i < ENTRIES_IN_DIR; ++i) {
-          directory_entry_type currentEntry = currentDir.entries[i];
-          unsigned short iNumber = currentEntry.iNumber;
-
-          if (iNumber == 0 || iNumber == currentInodeNumber) {
-            continue;
-          }
-
-          int same = strcmp(token, currentEntry.fileName);
-          if (same == 0) {
-            if (nextTok == NULL) {
-              return iNumber;
-            }
-            return recurseIntoFiles(fd, nextTok, iNumber);
-          }
-        }
+        return lookThroughDirectory(fd, &currentDir, currentInodeNumber,
+                                    token, nextTok);
       }
     }
   }
   return 0;
 }
 
+int writeToFile(int fsFd, int writeFd, unsigned int dataBlockNum, unsigned int*
+sizeToWrite) {
+  if (dataBlockNum != 0) {
+    plain_block_type b = getPlainBlockFromFs(fsFd, dataBlockNum);
+    unsigned int toWrite;
+    if (BLOCK_SIZE < *sizeToWrite) {
+      toWrite = BLOCK_SIZE;
+    } else {
+      toWrite = *sizeToWrite;
+    }
+    int writeStatus = write(writeFd, &b.text, toWrite);
+    if (writeStatus < 0) {
+      printf("There was an error writing to myoutputfile.txt.\n");
+      return -1;
+    }
+    *sizeToWrite -= writeStatus;
+  }
+  return 0;
+}
+
 void findFile(int fd, char path[]) {
+  lseek(fd, 2048, SEEK_SET);
   char * firstToken = strtok(path, "/");
   // traverse directories and return the inode for file we are looking for.
   unsigned short iNumberForFile = recurseIntoFiles(fd, firstToken, 1);
@@ -153,53 +169,25 @@ void findFile(int fd, char path[]) {
     if (writefile < 0) {
       printf("There was an error opening output file. Error Number %d\n",
              errno);
+      return;
     }
 
     unsigned int sizeToWrite  = inodeForFile.size;
 
     if (inodeForFile.flags & largeFileFlag) {
-      // every block here is a list of block numbers.
-      // each one has 256 ints that point to data blocks.
       for (int i = 0; i < INODE_ADDR_LENGTH - 1; ++i) {
         single_indirect_block_type block = getIndirectBlockFromFs(fd,
             inodeForFile.addr[i]);
 
         for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
-          unsigned int dataBlockNum = block.addrs[j];
-          if (dataBlockNum != 0) {
-            plain_block_type b = getPlainBlockFromFs(fd, block.addrs[j]);
-            unsigned int toWrite;
-            if (BLOCK_SIZE < sizeToWrite) {
-              toWrite = BLOCK_SIZE;
-            } else {
-              toWrite = sizeToWrite;
-            }
-            int writeStatus = write(writefile, &b.text, toWrite);
-            if (writeStatus < 0) {
-              printf("There was an error writing to myoutputfile.txt.\n");
-            }
-            sizeToWrite -= writeStatus;
-          }
+          int s = writeToFile(fd, writefile, block.addrs[j], &sizeToWrite);
+          if (s < 0) return;
         }
       }
     } else {
       for (int i = 0; i < INODE_ADDR_LENGTH - 1; ++i) {
-        unsigned int dataBlockNum = inodeForFile.addr[i];
-
-        if (dataBlockNum != 0) {
-          plain_block_type b = getPlainBlockFromFs(fd, inodeForFile.addr[i]);
-          unsigned int toWrite;
-          if (BLOCK_SIZE < sizeToWrite) {
-            toWrite = BLOCK_SIZE;
-          } else {
-            toWrite = sizeToWrite;
-          }
-          int writeStatus = write(writefile, &b.text, toWrite);
-          if (writeStatus < 0) {
-            printf("There was an error writing to myoutputfile.txt.\n");
-          }
-          sizeToWrite -= writeStatus;
-        }
+        int s = writeToFile(fd, writefile, inodeForFile.addr[i], &sizeToWrite);
+        if (s < 0) return;
       }
     }
     int closeStatus = close(writefile);
@@ -212,7 +200,7 @@ void findFile(int fd, char path[]) {
 
 int main() {
   char v6Filename[256];
-  char fileToRead[256];
+  char fileToRead[512];
 
   printf("Welcome. Enter the v6 filename: \n");
   scanf("%s", v6Filename);
@@ -223,14 +211,14 @@ int main() {
     return 1;
   }
 
-  printf("Enter the file you want to read from it: \n");
+  printf("Enter the file you want to read from it (leading slash is optional): "
+         "\n");
   scanf("%s", fileToRead);
   printf("Looking for that file. Running findFile().\n");
 
   // start off at super block (block 2)
   // by going 1024 bytes from the left.
   lseek(fd, 1024, SEEK_SET);
-  superblock_type superBlock;
   read(fd, &superBlock, BLOCK_SIZE);
 
   findFile(fd, fileToRead);
