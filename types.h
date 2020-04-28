@@ -61,14 +61,14 @@ typedef struct {
 #pragma pack(1)
 typedef struct {
   unsigned int addrs[ADDRS_IN_INDIRECT_BLOCK];
-} single_indirect_block_type;
+} indirect_block_type;
 
 const unsigned short dirFlag = 0b0100000000000000;
 const unsigned short regularFileFlag = 0b1000000000000000;
 const unsigned short largeFileFlag = 0b0001000000000000;
 
 unsigned int blockToByteOffset(unsigned int blockNum);
-single_indirect_block_type getIndirectBlockFromFs(int fd, unsigned int
+indirect_block_type getIndirectBlockFromFs(int fd, unsigned int
 blockNum);
 directory_block_type getDirectoryBlockFromFs(int fd, unsigned int blockNum);
 plain_block_type getPlainBlockFromFs(int fd, unsigned int blockNum);

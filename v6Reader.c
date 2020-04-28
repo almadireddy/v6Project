@@ -11,10 +11,10 @@ unsigned int blockToByteOffset(unsigned int blockNum) {
   return BLOCK_SIZE * (blockNum);
 }
 
-single_indirect_block_type getIndirectBlockFromFs(int fd, unsigned int
+indirect_block_type getIndirectBlockFromFs(int fd, unsigned int
 blockNum) {
   lseek(fd, blockToByteOffset(blockNum), SEEK_SET);
-  single_indirect_block_type dir;
+  indirect_block_type dir;
   read(fd, &dir, BLOCK_SIZE);
 
   return dir;
@@ -51,15 +51,12 @@ inode_type getInodeBlockFromFs(int fd, unsigned int inodeNumber) {
   return inode;
 }
 
-unsigned short lookThroughDirectory(int fd, directory_block_type *currentDir,
-                                    unsigned int currentInodeNumber, char
-                                    token[], char nextTok[]) {
+unsigned short lookThroughDirectory(int fd, directory_block_type *currentDir, unsigned int currentInodeNumber, char token[], char nextTok[]) {
   for (int i = 0; i < ENTRIES_IN_DIR; ++i) {
     directory_entry_type currentEntry = currentDir->entries[i];
     unsigned short iNumber = currentEntry.iNumber;
 
-    if (iNumber == 0 || iNumber == currentInodeNumber || iNumber > superBlock
-    .isize*INODE_SIZE) {
+    if (iNumber == 0 || iNumber == currentInodeNumber || iNumber > superBlock.isize*INODE_SIZE) {
       continue;
     }
 
@@ -75,8 +72,7 @@ unsigned short lookThroughDirectory(int fd, directory_block_type *currentDir,
 }
 
 // use inode size to determine how much of the block to read;
-unsigned short recurseIntoFiles(int fd, char token[], unsigned int
-currentInodeNumber) {
+unsigned short recurseIntoFiles(int fd, char token[], unsigned int currentInodeNumber) {
   char* nextTok = strtok(NULL, "/");
 
   printf("Looking for: %s\n", token);
@@ -92,8 +88,7 @@ currentInodeNumber) {
           continue;
         }
 
-        single_indirect_block_type indirectBlock = getIndirectBlockFromFs(fd,
-                                                                          indirectBlockNum);
+        indirect_block_type indirectBlock = getIndirectBlockFromFs(fd, indirectBlockNum);
 
         for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
           unsigned int currentAddress = indirectBlock.addrs[j];
@@ -104,8 +99,7 @@ currentInodeNumber) {
 
           directory_block_type currentDir = getDirectoryBlockFromFs(fd, currentAddress);
 
-          return lookThroughDirectory(fd, &currentDir, currentInodeNumber,
-                                      token, nextTok);
+          return lookThroughDirectory(fd, &currentDir, currentInodeNumber, token, nextTok);
         }
       }
     }
@@ -118,19 +112,16 @@ currentInodeNumber) {
           continue;
         }
 
-        directory_block_type currentDir = getDirectoryBlockFromFs(fd,
-                                                                  blockNumber);
+        directory_block_type currentDir = getDirectoryBlockFromFs(fd, blockNumber);
 
-        return lookThroughDirectory(fd, &currentDir, currentInodeNumber,
-                                    token, nextTok);
+        return lookThroughDirectory(fd, &currentDir, currentInodeNumber, token, nextTok);
       }
     }
   }
   return 0;
 }
 
-int writeToFile(int fsFd, int writeFd, unsigned int dataBlockNum, unsigned int*
-sizeToWrite) {
+int writeToFile(int fsFd, int writeFd, unsigned int dataBlockNum, unsigned int* sizeToWrite) {
   if (dataBlockNum != 0) {
     plain_block_type b = getPlainBlockFromFs(fsFd, dataBlockNum);
     unsigned int toWrite;
@@ -167,21 +158,42 @@ void findFile(int fd, char path[]) {
 
     int writefile = open("myoutputfile.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (writefile < 0) {
-      printf("There was an error opening output file. Error Number %d\n",
-             errno);
+      printf("There was an error opening output file. Error Number %d\n", errno);
       return;
     }
 
-    unsigned int sizeToWrite  = inodeForFile.size;
+    unsigned int sizeToWrite = inodeForFile.size;
 
     if (inodeForFile.flags & largeFileFlag) {
       for (int i = 0; i < INODE_ADDR_LENGTH - 1; ++i) {
-        single_indirect_block_type block = getIndirectBlockFromFs(fd,
-            inodeForFile.addr[i]);
+        indirect_block_type block = getIndirectBlockFromFs(fd, inodeForFile.addr[i]);
 
         for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
-          int s = writeToFile(fd, writefile, block.addrs[j], &sizeToWrite);
+          unsigned int indirectBlockNum = block.addrs[j];
+          if (indirectBlockNum == 0) continue;
+
+          int s = writeToFile(fd, writefile, indirectBlockNum, &sizeToWrite);
           if (s < 0) return;
+        }
+      }
+      unsigned int lastAddr = inodeForFile.addr[INODE_ADDR_LENGTH - 1];
+      // check last addr int to handle double indirect
+      if (lastAddr > 0) {
+        indirect_block_type doubleIndirectBlock = getIndirectBlockFromFs(fd, lastAddr);
+
+        for (int i = 0; i < ADDRS_IN_INDIRECT_BLOCK; ++i) {
+          unsigned int indirectBlockNumber = doubleIndirectBlock.addrs[i];
+          if (indirectBlockNumber == 0) continue;
+
+          indirect_block_type indirectBlock = getIndirectBlockFromFs(fd, indirectBlockNumber);
+
+          for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
+            unsigned int doubleIndirectBlockNum = indirectBlock.addrs[j];
+
+            if (doubleIndirectBlockNum == 0) continue;
+            int s = writeToFile(fd, writefile, doubleIndirectBlockNum, &sizeToWrite);
+            if (s < 0) return;
+          }
         }
       }
     } else {
