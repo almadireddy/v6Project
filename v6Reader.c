@@ -177,22 +177,29 @@ void findFile(int fd, char path[]) {
         }
       }
       unsigned int lastAddr = inodeForFile.addr[INODE_ADDR_LENGTH - 1];
-      // check last addr int to handle double indirect
+      // check last addr int to handle triple indirect
       if (lastAddr > 0) {
-        indirect_block_type doubleIndirectBlock = getIndirectBlockFromFs(fd, lastAddr);
+        indirect_block_type tripleIndirectBlock = getIndirectBlockFromFs(fd, lastAddr);
 
         for (int i = 0; i < ADDRS_IN_INDIRECT_BLOCK; ++i) {
-          unsigned int indirectBlockNumber = doubleIndirectBlock.addrs[i];
-          if (indirectBlockNumber == 0) continue;
+          unsigned int doubleIndirectBlockNumber = tripleIndirectBlock.addrs[i];
+          if (doubleIndirectBlockNumber == 0) continue;
 
-          indirect_block_type indirectBlock = getIndirectBlockFromFs(fd, indirectBlockNumber);
+          indirect_block_type doubleIndirectBlock = getIndirectBlockFromFs(fd, doubleIndirectBlockNumber);
 
           for (int j = 0; j < ADDRS_IN_INDIRECT_BLOCK; ++j) {
-            unsigned int doubleIndirectBlockNum = indirectBlock.addrs[j];
+            unsigned int singleIndirectBlockNumber = doubleIndirectBlock.addrs[j];
+            if (singleIndirectBlockNumber == 0) continue;
 
-            if (doubleIndirectBlockNum == 0) continue;
-            int s = writeToFile(fd, writefile, doubleIndirectBlockNum, &sizeToWrite);
-            if (s < 0) return;
+            indirect_block_type singleIndirectBlock = getIndirectBlockFromFs(fd, singleIndirectBlockNumber);
+
+            for (int k = 0; k < ADDRS_IN_INDIRECT_BLOCK; ++k) {
+              unsigned int blockNumber = singleIndirectBlock.addrs[k];
+              if (blockNumber == 0) continue;
+
+              int s = writeToFile(fd, writefile, singleIndirectBlockNumber, &sizeToWrite);
+              if (s < 0) return;
+            }
           }
         }
       }
