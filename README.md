@@ -4,4 +4,15 @@ This program is a class assignment for CS 4348: Operating Systems Concepts. It t
 
 ## Running the program
 
-I assume that you will have the modified v6 filesystem at a known directory. Run `make` to compile or `make run` to make, and then run the output binary. 
+I assume that you will have the modified v6 filesystem at a known directory. Run `make` to compile or `make run` to make, and then run the output binary.
+
+The program will have some output, and will await for you to put in the path to the v6 filesystem. If it successfully finds and opens the file, it will prompt you to enter the file you are looking for.
+
+It will run the procedures to find that file, and if it completes, it will attempt to open a file called "myoutputfile.txt" and put the contents of the file you're looking for in there.
+
+## Assumptions
+
+I made the following assumptions:
+  - We didn't need to handle anything but plain files and directories.
+  - We didn't need to handle large directories (directories with large flag set to 1). (This was per a message sent on telegram by Professor).
+

@@ -1,10 +1,12 @@
 CC=gcc
 CFLAGS= -std=c99
 
-v6Reader: 
+project2: 
 
-run: v6Reader
-	./v6Reader
+run: project2
+	./project2
 
 clean:
-	rm v6Reader 
+	-rm project2
+	-rm myoutputfile.txt
+	-rm *~
