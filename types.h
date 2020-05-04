@@ -1,5 +1,5 @@
 //
-// Created by Aahlad Madireddy on 4/22/20.
+// Created by Aahlad Madireddy on 4/22/20. Contains types and forward declarations.
 //
 
 #ifndef FS_TYPES_H
@@ -32,7 +32,7 @@ typedef struct {
   unsigned short gid; // Group ID of owner
   unsigned int size; // 4 bytes - Size of the file
   unsigned int addr[INODE_ADDR_LENGTH]; // Block numbers of the file location. addr[10] is used
-  // for double indirect block
+  // for triple indirect block
   unsigned short actime[2]; // Last Access time
   unsigned short modtime[2]; // Last modified time
 } inode_type;
@@ -46,27 +46,32 @@ typedef struct {
   char fileName[14];
 } directory_entry_type;
 
+// this is a directory block, just an array of directory entries.
 #define ENTRIES_IN_DIR 64
 #pragma pack(1)
 typedef struct {
   directory_entry_type entries[ENTRIES_IN_DIR];
 } directory_block_type;
 
+// plain block, represented as a char array
 #pragma pack(1)
 typedef struct {
   char text[BLOCK_SIZE];
 } plain_block_type;
 
+// an indirect block that contains an array of int block numbers
 #define ADDRS_IN_INDIRECT_BLOCK BLOCK_SIZE/sizeof(int)
 #pragma pack(1)
 typedef struct {
   unsigned int addrs[ADDRS_IN_INDIRECT_BLOCK];
 } indirect_block_type;
 
+// Flags for inode.flags
 const unsigned short dirFlag = 0b0100000000000000;
 const unsigned short regularFileFlag = 0b1000000000000000;
 const unsigned short largeFileFlag = 0b0001000000000000;
 
+// Forward declarations.
 unsigned int blockToByteOffset(unsigned int blockNum);
 indirect_block_type getIndirectBlockFromFs(int fd, unsigned int
 blockNum);
